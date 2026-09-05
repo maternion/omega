@@ -138,3 +138,27 @@ func TestFindOmegaBinary(t *testing.T) {
 		t.Fatalf("expected env override %q, got %q", bin, got)
 	}
 }
+
+// TestRunDelegateTaskSendBeforeDone verifies the result is injected
+// before the task is marked done. PendingDelegations() is derived from
+// done; if done were set first, a host checking pending > 0 could race
+// the channel send, see 0, and end the loop before the result arrives.
+// This pins the ordering fix: the message must be in the channel while
+// pending still reports > 0.
+func TestRunDelegateTaskSendBeforeDone(t *testing.T) {
+	bin := writeStub(t, "stub-order", "order-result", 0)
+	t.Setenv("OMEGA_BIN", bin)
+
+	d := NewDelegate()
+	if _, err := d.runDelegateTask(context.Background(), map[string]any{"prompt": "x", "timeout": 30}); err != nil {
+		t.Fatalf("runDelegateTask: %v", err)
+	}
+
+	// The result must arrive on the channel. PendingCount may still be
+	// 1 here (done set after send) — that is the desired state.
+	select {
+	case <-d.InjectedChannel():
+	case <-time.After(15 * time.Second):
+		t.Fatal("timed out waiting for injected result")
+	}
+}

@@ -143,12 +143,15 @@ func (d *Delegate) runDelegateTask(ctx context.Context, args map[string]any) (st
 		} else {
 			task.output.Write(output)
 		}
-		task.done = true
 		result := task.output.String()
 		task.mu.Unlock()
 
-		// Inject result into host conversation. Non-blocking send;
-		// if buffer full, the result is logged and dropped.
+		// Inject result BEFORE marking done. PendingDelegations() is
+		// derived from done; if done is set first, a host checking
+		// pending > 0 races the channel send, sees 0, and ends the
+		// loop before the result is delivered. Sending first keeps
+		// pending > 0 until the message is in the channel, so the
+		// host's blocking select always receives it.
 		select {
 		case d.injected <- injectedMsg{text: result, source: "delegate:" + taskID}:
 		default:
@@ -158,6 +161,10 @@ func (d *Delegate) runDelegateTask(ctx context.Context, args map[string]any) (st
 				fmt.Fprintf(os.Stderr, "delegate: injected channel full, dropping result for %s\n", taskID)
 			}
 		}
+
+		task.mu.Lock()
+		task.done = true
+		task.mu.Unlock()
 	}()
 
 	return fmt.Sprintf("Subagent %s started. The result will appear automatically when it finishes. Use delegate.status to check progress.", taskID), nil

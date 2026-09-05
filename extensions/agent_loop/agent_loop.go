@@ -276,6 +276,33 @@ func (Loop) Run(ctx context.Context, opts agent.LoopOptions) error {
 		}
 
 		if len(toolCalls) == 0 {
+			// Non-blocking drain first: covers the race where a
+			// subagent finished and injected its result but the
+			// pending counter already read 0. Without this, results
+			// that arrive between done=true and the channel send
+			// (now reordered in delegate, but kept for any source
+			// that sets done before sending) would be skipped.
+			if opts.InjectedMessages != nil {
+				var combined string
+				draining := true
+				for draining {
+					select {
+					case msg, ok := <-opts.InjectedMessages:
+						if ok {
+							if combined != "" {
+								combined += "\n\n---\n\n"
+							}
+							combined += msg.Text
+						}
+					default:
+						draining = false
+					}
+				}
+				if combined != "" {
+					messages = append(messages, ai.NewUser(combined))
+					continue
+				}
+			}
 			// One-shot mode (UserInput == nil): block if subagents are
 			// still running. TUI mode (UserInput != nil) never blocks.
 			if opts.InjectedMessages != nil && opts.UserInput == nil && opts.PendingDelegations != nil && opts.PendingDelegations() > 0 {
