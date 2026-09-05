@@ -210,13 +210,16 @@ func (Loop) Run(ctx context.Context, opts agent.LoopOptions) error {
 		opts.Events <- assistantEvent
 
 		// Execute tool calls concurrently. Results are collected in
-		// order so the message history stays deterministic.
+		// order so the message history stays deterministic, but each
+		// result is emitted as soon as it completes so the UI streams
+		// them instead of blocking on the slowest tool.
 		results := make([]ai.ToolResult, len(toolCalls))
 		var wg sync.WaitGroup
 		for i, call := range toolCalls {
 			tool, ok := tools[call.Name]
 			if !ok {
 				results[i] = ai.NewToolResult("unknown tool: "+call.Name, call.ID, true)
+				opts.Events <- agent.ToolResultEvent{Type: "tool_result", Message: results[i]}
 				continue
 			}
 			wg.Add(1)
@@ -234,6 +237,9 @@ func (Loop) Run(ctx context.Context, opts agent.LoopOptions) error {
 					}
 					results[idx] = ai.NewToolResult(result, c.ID, false)
 				}
+				// Emit immediately so the UI sees this result as
+				// soon as it is ready, not after all tools finish.
+				opts.Events <- agent.ToolResultEvent{Type: "tool_result", Message: results[idx]}
 			}(i, call, tool)
 		}
 		wg.Wait()
@@ -241,8 +247,6 @@ func (Loop) Run(ctx context.Context, opts agent.LoopOptions) error {
 		executed := 0
 		for _, msg := range results {
 			messages = append(messages, msg)
-			toolResultEvent := agent.ToolResultEvent{Type: "tool_result", Message: msg}
-			opts.Events <- toolResultEvent
 			executed++
 		}
 
