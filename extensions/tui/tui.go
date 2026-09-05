@@ -257,40 +257,40 @@ type model struct {
 	cancel               context.CancelFunc // cancels the in-flight run; nil when idle
 	events               <-chan agent.Event // run goroutine writes here; Update drains via cmd
 	store                agent.StoreProvider
-	sessionID            string                 // current session; "" until the first message creates one
-	storeErr             string                 // store open/persistence error, shown in the status line
-	promptHistory        []string               // previously submitted prompts, for Up/Down recall
-	historyIndex         int                    // position in promptHistory; 0 = empty/current input
-	autocompleteMatches  []string               // slash commands matching the current input
-	autocompleteIndex    int                    // highlighted match; -1 = none selected
-	autocompleteOffset   int                    // first visible row in the dropup window
-	autocompleteSlashPos int                    // byte offset of the / triggering autocomplete, -1 = none
-	screenHeight         int                    // terminal height from the last resize
-	skills               []agent.Skill          // loaded skills, for autocomplete and invocation
-	extensions           *agent.Context       // plugin context (provider, compactor, commands, etc.)
-	commands             []string               // knownCommands + skill names, per-model copy
-	showThinking         bool                   // /thinking display toggle; auto-set from thinkingLevel
-	thinkingLevel        string                 // /thinking level: none, off, on, minimal, low, medium, high, extra high, max, ultra
-	showToolResults      bool                   // /tools toggle; default false (collapsed)
-	toolResultsAuto      bool                   // /tools auto; short results full, long ones collapsed
-	queuedInput          string                 // follow-up typed while agent runs; auto-submits on done
-	userInput            chan string            // mode flag for agent loop (nil = one-shot, non-nil = TUI)
-	autoNamed            bool                   // true after the first auto-name attempt
-	sessionLabel         string                 // model-generated title, shown in status bar
-	autoNameGen          int                    // bumped on /new; stale auto-name results are dropped
-	sessionList          []agent.Session        // cached from last /sessions, for /resume by #
-	modelList            []string               // cached from last /models, for /model <#> selection
-	ephemeral            bool                   // /new --ephemeral; nothing persisted
-	theme                Theme                  // active color/style theme
-	trustState           string                 // "trusted" / "untrusted" / "" (no AGENTS.md), shown in status bar
-	notifications        string                 // "bell" / "desktop" / "off", fired on turn complete
-	version              string                 // build version for splash display
-	cwd                  string                 // working directory passed from host
-	lastToolCall         string                 // last tool call name, for syntax highlighting results
-	lastToolArgs         map[string]any         // last tool call args, for language detection
-	lastRender           time.Time              // debounce for live glamour rendering during streaming
-	lastRenderedResponse string                 // cached glamour output for debounced frames
-	contextWindow        int                    // auto-discovered from provider; 0 = unknown, fall back to config
+	sessionID            string          // current session; "" until the first message creates one
+	storeErr             string          // store open/persistence error, shown in the status line
+	promptHistory        []string        // previously submitted prompts, for Up/Down recall
+	historyIndex         int             // position in promptHistory; 0 = empty/current input
+	autocompleteMatches  []string        // slash commands matching the current input
+	autocompleteIndex    int             // highlighted match; -1 = none selected
+	autocompleteOffset   int             // first visible row in the dropup window
+	autocompleteSlashPos int             // byte offset of the / triggering autocomplete, -1 = none
+	screenHeight         int             // terminal height from the last resize
+	skills               []agent.Skill   // loaded skills, for autocomplete and invocation
+	extensions           *agent.Context  // plugin context (provider, compactor, commands, etc.)
+	commands             []string        // knownCommands + skill names, per-model copy
+	showThinking         bool            // /thinking display toggle; auto-set from thinkingLevel
+	thinkingLevel        string          // /thinking level: none, off, on, minimal, low, medium, high, extra high, max, ultra
+	showToolResults      bool            // /tools toggle; default false (collapsed)
+	toolResultsAuto      bool            // /tools auto; short results full, long ones collapsed
+	queuedInput          string          // follow-up typed while agent runs; auto-submits on done
+	userInput            chan string     // mode flag for agent loop (nil = one-shot, non-nil = TUI)
+	autoNamed            bool            // true after the first auto-name attempt
+	sessionLabel         string          // model-generated title, shown in status bar
+	autoNameGen          int             // bumped on /new; stale auto-name results are dropped
+	sessionList          []agent.Session // cached from last /sessions, for /resume by #
+	modelList            []string        // cached from last /models, for /model <#> selection
+	ephemeral            bool            // /new --ephemeral; nothing persisted
+	theme                Theme           // active color/style theme
+	trustState           string          // "trusted" / "untrusted" / "" (no AGENTS.md), shown in status bar
+	notifications        string          // "bell" / "desktop" / "off", fired on turn complete
+	version              string          // build version for splash display
+	cwd                  string          // working directory passed from host
+	lastToolCall         string          // last tool call name, for syntax highlighting results
+	lastToolArgs         map[string]any  // last tool call args, for language detection
+	lastRender           time.Time       // debounce for live glamour rendering during streaming
+	lastRenderedResponse string          // cached glamour output for debounced frames
+	contextWindow        int             // auto-discovered from provider; 0 = unknown, fall back to config
 }
 
 // streamDoneMsg signals that the run goroutine has finished.
@@ -507,8 +507,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.transcript += "\n" + m.theme.Info.Render("[model: "+m.modelName+"]") + "\n"
 			m.refresh()
 			if m.extensions != nil && m.extensions.Provider != nil {
-		m.extensions.Provider.SetModel(m.modelName)
-	}
+				m.extensions.Provider.SetModel(m.modelName)
+			}
 			return m, tea.Batch(m.titleCmd(), m.fetchModelInfoCmd())
 		}
 		if msg.Paste {
@@ -658,8 +658,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.err = ""
 					m.lastRenderedResponse = ""
 					if m.extensions != nil && m.extensions.Provider != nil {
-		m.extensions.Provider.SetModel(m.modelName)
-	}
+						m.extensions.Provider.SetModel(m.modelName)
+					}
 					m.startRun()
 					return m, tea.Batch(m.drainEvents(), m.titleCmd())
 				}
@@ -742,8 +742,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.err = ""
 			m.refresh()
 			if m.extensions != nil && m.extensions.Provider != nil {
-		m.extensions.Provider.SetModel(m.modelName)
-	}
+				m.extensions.Provider.SetModel(m.modelName)
+			}
 			return m, tea.Batch(m.titleCmd(), m.fetchModelInfoCmd())
 		}
 		m.err = "no models available"
@@ -1771,6 +1771,7 @@ func renderTranscript(messages []ai.Message, width int, t Theme) string {
 			}
 			sb.WriteString("\n")
 			content := m.Content
+			lines := strings.Count(content, "\n") + 1
 			hasHighlight := false
 			if !m.IsError {
 				if call, ok := toolCallsByID[m.ToolCallID]; ok {
@@ -1781,7 +1782,12 @@ func renderTranscript(messages []ai.Message, width int, t Theme) string {
 					}
 				}
 			}
-			if hasHighlight {
+			// Collapse long results to a summary line, mirroring the
+			// live toolResultsAuto path. Without this, resume expands
+			// every prior tool result (e.g. web searches) in full.
+			if lines > toolResultAutoThreshold {
+				sb.WriteString(t.Tool.Render(fmt.Sprintf("[tool result: %d lines]", lines)))
+			} else if hasHighlight {
 				// Don't wrap highlighted content in tool color;
 				// let chroma's colors stand on their own.
 				sb.WriteString(wordWrap(content, width))
@@ -2034,7 +2040,6 @@ func renderCodeBlock(code, lang string, width int, t Theme) string {
 	body := headerStyled + "\n" + strings.TrimRight(highlighted, "\n")
 	return style.Render(body)
 }
-
 
 // View renders the full screen: viewport on top, status bar, then the
 // autocomplete dropup panel (when open), textarea at the bottom. When

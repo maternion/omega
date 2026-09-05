@@ -1485,6 +1485,48 @@ func TestRenderTranscriptCompacted(t *testing.T) {
 	}
 }
 
+// TestRenderTranscriptCollapsesLongToolResult verifies resume collapses
+// tool results longer than toolResultAutoThreshold to a summary line,
+// matching the live toolResultsAuto path. Long web-search dumps should
+// not expand in full on resume.
+func TestRenderTranscriptCollapsesLongToolResult(t *testing.T) {
+	long := strings.Repeat("line\n", toolResultAutoThreshold+1)
+	messages := []ai.Message{
+		ai.NewUser("search"),
+		func() ai.Assistant {
+			a := ai.NewAssistant("")
+			a.ToolCalls = []ai.ToolCall{{ID: "c1", Name: "web.search", Arguments: map[string]any{"q": "x"}}}
+			return a
+		}(),
+		ai.NewToolResult(long, "c1", false),
+	}
+	out := ansiStrip(renderTranscript(messages, 80, themes["dark"]))
+	if !strings.Contains(out, "[tool result:") {
+		t.Fatalf("expected collapsed summary, got %q", out)
+	}
+	if strings.Contains(out, "line\nline\nline") {
+		t.Fatalf("long result should be collapsed, not rendered in full: %q", out[:200])
+	}
+}
+
+// TestRenderTranscriptShortToolResultFull verifies short tool results
+// still render full on resume (under the collapse threshold).
+func TestRenderTranscriptShortToolResultFull(t *testing.T) {
+	messages := []ai.Message{
+		ai.NewUser("time"),
+		func() ai.Assistant {
+			a := ai.NewAssistant("")
+			a.ToolCalls = []ai.ToolCall{{ID: "c1", Name: "shell.run", Arguments: map[string]any{"command": "date"}}}
+			return a
+		}(),
+		ai.NewToolResult("11:12 AM", "c1", false),
+	}
+	out := ansiStrip(renderTranscript(messages, 80, themes["dark"]))
+	if !strings.Contains(out, "11:12 AM") {
+		t.Fatalf("short result should render full, got %q", out)
+	}
+}
+
 // TestWindowTitle verifies the terminal title format.
 func TestWindowTitle(t *testing.T) {
 	if got := windowTitle("idle", "glm-5.2"); got != "Ω | idle | glm-5.2" {
@@ -1755,11 +1797,13 @@ func (emptyModelsProvider) Stream(ctx context.Context, messages []ai.Message, to
 	go close(ch)
 	return ch
 }
-func (emptyModelsProvider) ModelName() string                { return "test" }
-func (emptyModelsProvider) SetModel(string)                 {}
-func (emptyModelsProvider) SetThinkingLevel(string)          {}
-func (emptyModelsProvider) ListModels() ([]string, error)   { return []string{}, nil }
-func (emptyModelsProvider) ModelInfo() (ai.ModelInfo, error) { return ai.ModelInfo{ContextWindow: 8192}, nil }
+func (emptyModelsProvider) ModelName() string             { return "test" }
+func (emptyModelsProvider) SetModel(string)               {}
+func (emptyModelsProvider) SetThinkingLevel(string)       {}
+func (emptyModelsProvider) ListModels() ([]string, error) { return []string{}, nil }
+func (emptyModelsProvider) ModelInfo() (ai.ModelInfo, error) {
+	return ai.ModelInfo{ContextWindow: 8192}, nil
+}
 
 // errorModelsProvider is a minimal ai.Provider whose ListModels always
 // fails, exercising the error branch of handleModels.
@@ -1770,11 +1814,15 @@ func (errorModelsProvider) Stream(ctx context.Context, messages []ai.Message, to
 	go close(ch)
 	return ch
 }
-func (errorModelsProvider) ModelName() string                { return "test" }
-func (errorModelsProvider) SetModel(string)                 {}
-func (errorModelsProvider) SetThinkingLevel(string)          {}
-func (errorModelsProvider) ListModels() ([]string, error)   { return nil, fmt.Errorf("provider unavailable") }
-func (errorModelsProvider) ModelInfo() (ai.ModelInfo, error) { return ai.ModelInfo{ContextWindow: 8192}, nil }
+func (errorModelsProvider) ModelName() string       { return "test" }
+func (errorModelsProvider) SetModel(string)         {}
+func (errorModelsProvider) SetThinkingLevel(string) {}
+func (errorModelsProvider) ListModels() ([]string, error) {
+	return nil, fmt.Errorf("provider unavailable")
+}
+func (errorModelsProvider) ModelInfo() (ai.ModelInfo, error) {
+	return ai.ModelInfo{ContextWindow: 8192}, nil
+}
 
 // TestHandleModelsWithFakeProvider covers the happy path: a FakeProvider
 // wired into agent.Context returns a model list, and handleModels renders
@@ -2467,6 +2515,7 @@ func TestRenderMarkdownZeroWidth(t *testing.T) {
 		t.Fatalf("expected text preserved at zero width, got %q", plain)
 	}
 }
+
 // stubCompactor is a minimal CompactionProvider for testing handleCompact.
 // It returns a fixed compacted message set regardless of input.
 type stubCompactor struct{}
