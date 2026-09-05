@@ -199,11 +199,9 @@ func TestAnthropicConvertMessages(t *testing.T) {
 		{"role": "user", "content": "hi"},
 		{"role": "assistant", "content": "hello", "tool_calls": []any{
 			map[string]any{
-				"id": "t1",
-				"function": map[string]any{
-					"name":      "search",
-					"arguments": map[string]any{"q": "test"},
-				},
+				"id":        "t1",
+				"name":      "search",
+				"arguments": map[string]any{"q": "test"},
 			},
 		}},
 		{"role": "tool", "content": "found", "tool_call_id": "t1"},
@@ -237,6 +235,93 @@ func TestAnthropicConvertMessages(t *testing.T) {
 	}
 	if toolBlocks[0]["type"] != "tool_result" {
 		t.Fatalf("tool block type = %v, want tool_result", toolBlocks[0]["type"])
+	}
+	// assistant tool_use block carries the flat ai.ToolCall shape
+	if asstContent[1]["id"] != "t1" {
+		t.Errorf("tool_use id = %v, want t1", asstContent[1]["id"])
+	}
+	if asstContent[1]["name"] != "search" {
+		t.Errorf("tool_use name = %v, want search", asstContent[1]["name"])
+	}
+	input, _ := asstContent[1]["input"].(map[string]any)
+	if input["q"] != "test" {
+		t.Errorf("tool_use input = %v, want q=test", asstContent[1]["input"])
+	}
+}
+
+// TestOpenAIConvertMessages verifies assistant tool_calls are
+// rewritten to the OpenAI wire format: type=function wrapper with
+// arguments as a JSON string.
+func TestOpenAIConvertMessages(t *testing.T) {
+	messages := []map[string]any{
+		{"role": "user", "content": "hi"},
+		{"role": "assistant", "content": "hello", "tool_calls": []any{
+			map[string]any{
+				"id":        "t1",
+				"name":      "shell.run",
+				"arguments": map[string]any{"cmd": "ls"},
+			},
+		}},
+		{"role": "tool", "content": "out", "tool_call_id": "t1"},
+	}
+	result := openaiConvertMessages(messages)
+	if len(result) != 3 {
+		t.Fatalf("got %d messages, want 3", len(result))
+	}
+	// non-assistant messages pass through unchanged (same length and
+	// role; maps are not comparable in Go)
+	if result[0]["role"] != "user" || result[0]["content"] != "hi" {
+		t.Errorf("user message should pass through unchanged, got %v", result[0])
+	}
+	calls, _ := result[1]["tool_calls"].([]map[string]any)
+	if len(calls) != 1 {
+		t.Fatalf("tool_calls = %d, want 1", len(calls))
+	}
+	tc := calls[0]
+	if tc["id"] != "t1" {
+		t.Errorf("id = %v, want t1", tc["id"])
+	}
+	if tc["type"] != "function" {
+		t.Errorf("type = %v, want function", tc["type"])
+	}
+	fn, _ := tc["function"].(map[string]any)
+	if fn["name"] != "shell.run" {
+		t.Errorf("function.name = %v, want shell.run", fn["name"])
+	}
+	args, _ := fn["arguments"].(string)
+	if args != `{"cmd":"ls"}` {
+		t.Errorf("function.arguments = %q, want a JSON string", args)
+	}
+}
+
+// TestOllamaConvertMessages verifies assistant tool_calls are wrapped
+// in the function object Ollama expects, with arguments as an object.
+func TestOllamaConvertMessages(t *testing.T) {
+	messages := []map[string]any{
+		{"role": "assistant", "content": "hello", "tool_calls": []any{
+			map[string]any{
+				"id":        "t1",
+				"name":      "shell.run",
+				"arguments": map[string]any{"cmd": "ls"},
+			},
+		}},
+	}
+	result := ollamaConvertMessages(messages)
+	calls, _ := result[0]["tool_calls"].([]map[string]any)
+	if len(calls) != 1 {
+		t.Fatalf("tool_calls = %d, want 1", len(calls))
+	}
+	tc := calls[0]
+	if tc["id"] != "t1" {
+		t.Errorf("id = %v, want t1", tc["id"])
+	}
+	fn, _ := tc["function"].(map[string]any)
+	if fn["name"] != "shell.run" {
+		t.Errorf("function.name = %v, want shell.run", fn["name"])
+	}
+	args, _ := fn["arguments"].(map[string]any)
+	if args["cmd"] != "ls" {
+		t.Errorf("function.arguments = %v, want cmd=ls object", fn["arguments"])
 	}
 }
 
@@ -661,7 +746,10 @@ func TestFlushToolCalls(t *testing.T) {
 		func(tc *testToolCall) string { return tc.Name },
 		func(tc *testToolCall) string { return tc.JSON })
 
-	wantOrder := []struct{ id, name string; n float64 }{
+	wantOrder := []struct {
+		id, name string
+		n        float64
+	}{
 		{"c1", "first", 1},
 		{"c2", "second", 2},
 		{"c3", "third", 3},

@@ -156,6 +156,120 @@ func messagesToJSON(messages []ai.Message) []map[string]any {
 	return msgJSON
 }
 
+// toolCallFields extracts the id, name, and arguments from a
+// serialized tool call map. Arguments are accepted as a map (the
+// ai.ToolCall shape) or a JSON string; both are returned as a map.
+func toolCallFields(tc map[string]any) (id, name string, args map[string]any) {
+	id, _ = tc["id"].(string)
+	name, _ = tc["name"].(string)
+	switch a := tc["arguments"].(type) {
+	case map[string]any:
+		args = a
+	case string:
+		json.Unmarshal([]byte(a), &args)
+	}
+	if fn, ok := tc["function"].(map[string]any); ok {
+		if n, ok := fn["name"].(string); ok && n != "" {
+			name = n
+		}
+		switch a := fn["arguments"].(type) {
+		case map[string]any:
+			args = a
+		case string:
+			json.Unmarshal([]byte(a), &args)
+		}
+	}
+	if args == nil {
+		args = map[string]any{}
+	}
+	return id, name, args
+}
+
+// copyMessage returns a shallow copy of a message map.
+func copyMessage(m map[string]any) map[string]any {
+	cp := make(map[string]any, len(m))
+	for k, v := range m {
+		cp[k] = v
+	}
+	return cp
+}
+
+// openaiConvertMessages normalizes assistant tool_calls to the OpenAI
+// wire format: each call becomes {"id", "type": "function",
+// "function": {"name", "arguments"}} with arguments as a JSON string.
+// ai.Assistant serializes tool calls as {"id", "name", "arguments"},
+// which OpenAI-compatible endpoints reject with
+// "invalid tool call arguments" on the turn after a tool call.
+func openaiConvertMessages(messages []map[string]any) []map[string]any {
+	out := make([]map[string]any, len(messages))
+	for i, m := range messages {
+		if role, _ := m["role"].(string); role == "assistant" {
+			if calls, ok := m["tool_calls"].([]any); ok {
+				cp := copyMessage(m)
+				converted := make([]map[string]any, 0, len(calls))
+				for _, c := range calls {
+					tc, ok := c.(map[string]any)
+					if !ok {
+						continue
+					}
+					id, name, args := toolCallFields(tc)
+					argsJSON, err := json.Marshal(args)
+					if err != nil {
+						argsJSON = []byte("{}")
+					}
+					converted = append(converted, map[string]any{
+						"id":   id,
+						"type": "function",
+						"function": map[string]any{
+							"name":      name,
+							"arguments": string(argsJSON),
+						},
+					})
+				}
+				cp["tool_calls"] = converted
+				out[i] = cp
+				continue
+			}
+		}
+		out[i] = m
+	}
+	return out
+}
+
+// ollamaConvertMessages normalizes assistant tool_calls to the Ollama
+// wire format: each call becomes {"function": {"name", "arguments"}}
+// with arguments as an object.
+func ollamaConvertMessages(messages []map[string]any) []map[string]any {
+	out := make([]map[string]any, len(messages))
+	for i, m := range messages {
+		if role, _ := m["role"].(string); role == "assistant" {
+			if calls, ok := m["tool_calls"].([]any); ok {
+				cp := copyMessage(m)
+				wrapped := make([]map[string]any, 0, len(calls))
+				for _, c := range calls {
+					tc, ok := c.(map[string]any)
+					if !ok {
+						continue
+					}
+					id, name, args := toolCallFields(tc)
+					entry := map[string]any{
+						"function": map[string]any{"name": name, "arguments": args},
+					}
+					if id != "" {
+						entry["id"] = id
+					}
+					wrapped = append(wrapped, entry)
+				}
+				cp["tool_calls"] = wrapped
+				out[i] = cp
+				continue
+			}
+		}
+		out[i] = m
+	}
+	return out
+}
+
 // toolSchemasToJSON converts ToolSchema values to the generic map
 // format expected by the streaming functions.
 func toolSchemasToJSON(tools []ai.ToolSchema) []map[string]any {
@@ -173,6 +287,7 @@ func toolSchemasToJSON(tools []ai.ToolSchema) []map[string]any {
 // --- Ollama ---
 
 func (p *Provider) streamOllama(ctx context.Context, events chan<- ai.StreamEvent, messages, tools []map[string]any) ai.StreamEnd {
+	messages = ollamaConvertMessages(messages)
 	payload := map[string]any{
 		"model":    p.modelName,
 		"messages": messages,
@@ -317,6 +432,7 @@ func (p *Provider) streamOpenAI(ctx context.Context, events chan<- ai.StreamEven
 		return ai.StreamEnd{Type: "stream_end", FinishReason: "error", Error: "openai: OPENAI_API_KEY not set"}
 	}
 
+	messages = openaiConvertMessages(messages)
 	payload := map[string]any{
 		"model":    p.modelName,
 		"messages": messages,
@@ -645,11 +761,11 @@ func anthropicConvertMessages(messages []map[string]any) (system string, result 
 				blocks = append(blocks, map[string]any{"type": "text", "text": content})
 			}
 			for _, raw := range toolCalls {
-				tc, _ := raw.(map[string]any)
-				fn, _ := tc["function"].(map[string]any)
-				name, _ := fn["name"].(string)
-				args, _ := fn["arguments"]
-				callID, _ := tc["id"].(string)
+				tc, ok := raw.(map[string]any)
+				if !ok {
+					continue
+				}
+				callID, name, args := toolCallFields(tc)
 				blocks = append(blocks, map[string]any{
 					"type":  "tool_use",
 					"id":    callID,
